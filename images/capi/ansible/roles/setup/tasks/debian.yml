@@ -1,0 +1,206 @@
+# Copyright 2018 The Kubernetes Authors.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+# http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+- name: Put templated sources.list in place
+  ansible.builtin.template:
+    src: etc/apt/sources.list.j2
+    dest: /etc/apt/sources.list
+    mode: "0644"
+  # OCI Base images have the required apt sources list embedded inside the image, adding the sources list
+  # from this repo leads to build failures(especially in Arm), hence ignoring the step.
+  # Ubuntu 24.04 has changed to deb822 source management
+  # As a result the there is change in format source configurations and location
+  when: >
+    (packer_builder_type != "oracle-oci") and
+    ((ansible_facts['distribution'] == "Ubuntu") and
+    (ansible_facts['distribution_major_version'] is version('24', '<')))
+
+- name: Put templated ubuntu.sources in place
+  ansible.builtin.template:
+    src: etc/apt/sources.list.d/ubuntu.sources.j2
+    dest: /etc/apt/sources.list.d/ubuntu.sources
+    mode: "0644"
+  # Ubuntu 24.04 has changed to deb822 source management
+  # As a result the there is change in format source configurations and location
+  when: (ansible_facts['distribution'] == "Ubuntu") and (ansible_facts['distribution_major_version'] is version('24', '>='))
+
+- name: Put templated apt.conf.d/90proxy in place when defined
+  ansible.builtin.template:
+    src: etc/apt/apt.conf.d/90proxy
+    dest: /etc/apt/apt.conf.d/90proxy
+    mode: "0644"
+  when: http_proxy is defined or https_proxy is defined
+
+- name: Trust Microsoft key for legacy Microsoft apt repositories before apt updates
+  ansible.builtin.include_tasks: trust_microsoft_apt_key.yml
+
+- name: Ensure cloud-final is in a running state
+  ansible.builtin.service:
+    name: cloud-final
+    state: started
+  check_mode: true
+  register: cloudfinalstatus
+  until: cloudfinalstatus.status.ActiveState == "active"
+  retries: 5
+  delay: 10
+  when: packer_builder_type == "oracle-oci" and extra_repos != ""
+
+- name: Find existing repo files
+  ansible.builtin.find:
+    depth: 1
+    paths:
+      - /etc/apt
+      - /etc/apt/sources.list.d
+    patterns:
+      - "*.list"
+      - "*.sources"
+  register: repo_files
+  when: disable_public_repos | default(false, true) | bool
+
+- name: Disable repos
+  ansible.builtin.command: mv {{ item.path }} {{ item.path }}.disabled
+  loop: "{{ repo_files.files }}"
+  when: disable_public_repos | default(false, true) | bool
+
+- name: Install extra repos
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /etc/apt/sources.list.d/{{ item | basename }}
+    mode: "0644"
+  loop: "{{ extra_repos.split() }}"
+  when: extra_repos != ""
+
+- name: Hold nullboot
+  ansible.builtin.dpkg_selections:
+    name: nullboot
+    selection: hold
+  when: packer_build_name is search('cvm')
+
+- name: Add '--no-tpm --no-efivars' to nullboot post install script
+  ansible.builtin.replace:
+    path: /var/lib/dpkg/info/nullboot.postinst
+    regexp: nullbootctl
+    replace: nullbootctl --no-tpm --no-efivars
+  when: packer_build_name is search('cvm')
+
+- name: Install packages
+  block:
+    - name: Check for existing policy-rc.d
+      ansible.builtin.stat:
+        path: /usr/sbin/policy-rc.d
+      register: setup_policy_rc_d
+      when: setup_block_qemu_hyperv_daemons | bool
+
+    - name: Preserve existing policy-rc.d
+      ansible.builtin.command:
+        argv:
+          - mv
+          - /usr/sbin/policy-rc.d
+          - "{{ setup_policy_rc_d_backup }}"
+      args:
+        creates: "{{ setup_policy_rc_d_backup }}"
+        removes: /usr/sbin/policy-rc.d
+      when:
+        - setup_block_qemu_hyperv_daemons | bool
+        - setup_policy_rc_d.stat.exists | default(false)
+
+    - name: Prevent Hyper-V daemons from starting during QEMU apt installs
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          for service in {{ setup_qemu_hyperv_daemons | join(' ') }}; do
+            if [ "$1" = "$service" ] || [ "$1" = "$service.service" ]; then
+              exit 101
+            fi
+          done
+
+          if [ -x "{{ setup_policy_rc_d_backup }}" ]; then
+            exec "{{ setup_policy_rc_d_backup }}" "$@"
+          fi
+
+          exit 0
+        dest: /usr/sbin/policy-rc.d
+        mode: "0755"
+      when: setup_block_qemu_hyperv_daemons | bool
+
+    - name: Perform a dist-upgrade
+      ansible.builtin.apt:
+        force_apt_get: true
+        update_cache: true
+        upgrade: dist
+      register: apt_lock_status
+      until: apt_lock_status is not failed
+      retries: 5
+      delay: 10
+
+    - name: Install baseline dependencies  # noqa: package-latest
+      ansible.builtin.apt:
+        force_apt_get: true
+        update_cache: true
+        name: "{{ debs }}"
+        state: latest
+      register: apt_lock_status
+      until: apt_lock_status is not failed
+      retries: 5
+      delay: 10
+
+    - name: Install extra debs  # noqa: package-latest
+      ansible.builtin.apt:
+        force_apt_get: true
+        name: "{{ extra_debs.split() }}"
+        state: latest
+      register: apt_lock_status
+      until: apt_lock_status is not failed
+      retries: 5
+      delay: 10
+
+    - name: Install pinned debs
+      ansible.builtin.apt:
+        force_apt_get: true
+        name: "{{ pinned_debs }}"
+        state: present
+        force: true
+      register: apt_lock_status
+      until: apt_lock_status is not failed
+      retries: 5
+      delay: 10
+  always:
+    - name: Remove temporary QEMU policy-rc.d
+      ansible.builtin.file:
+        path: /usr/sbin/policy-rc.d
+        state: absent
+      when: setup_block_qemu_hyperv_daemons | bool
+
+    - name: Restore existing policy-rc.d
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ setup_policy_rc_d_backup }}"
+          - /usr/sbin/policy-rc.d
+      args:
+        creates: /usr/sbin/policy-rc.d
+        removes: "{{ setup_policy_rc_d_backup }}"
+      when:
+        - setup_block_qemu_hyperv_daemons | bool
+        - setup_policy_rc_d.stat.exists | default(false)
+
+- name: Trust Microsoft key for legacy Microsoft apt repositories after package setup
+  ansible.builtin.include_tasks: trust_microsoft_apt_key.yml
+
+- name: Remove '--no-tpm --no-efivars' from nullboot post install script
+  ansible.builtin.replace:
+    path: /var/lib/dpkg/info/nullboot.postinst
+    regexp: nullbootctl --no-tpm --no-efivars
+    replace: nullbootctl
+  when: packer_build_name is search('cvm')

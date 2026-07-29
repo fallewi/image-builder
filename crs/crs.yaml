@@ -1,0 +1,15 @@
+apiVersion: addons.cluster.x-k8s.io/v1beta2
+kind: ClusterResourceSet
+metadata:
+  name: cilium
+  namespace: default
+spec:
+  clusterSelector:
+    matchLabels:
+      cni: cilium
+
+  strategy: ApplyOnce
+
+  resources:
+    - kind: ConfigMap
+      name: cilium-manifest

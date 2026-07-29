@@ -1,0 +1,15 @@
+- name: Create /curtin directory
+  ansible.builtin.file:
+    path: /curtin
+    state: directory
+    mode: "0775"
+
+# Additional instruction:
+# If you need to keep a custom curtin script, create a custom role containing the curtin hooks.
+# For more information on how to create and use custom roles, refer to the official documentation:
+# https://image-builder.sigs.k8s.io/capi/capi#customization
+
+# iSCSI configuration note:
+# If you need unique names for the iSCSI InitiatorName, add a KubeadmConfigTemplate and include the following command under spec.preKubeadmCommands:
+#
+# echo "InitiatorName=$(iscsi-iname -p iqn.2004-10.com.ubuntu:$(cat /etc/hostname))" > /etc/iscsi/initiatorname.iscsi

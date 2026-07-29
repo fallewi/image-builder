@@ -1,0 +1,77 @@
+{
+  "builders": [
+    {
+      "api_token": "{{ user `access_token` }}",
+      "image": "{{ user `source_image` }}",
+      "name": "{{user `build_name`}}",
+      "region": "{{ user `region` }}",
+      "size": "{{ user `size` }}",
+      "snapshot_name": "Cluster API Kubernetes {{ user `kubernetes_semver` }} {{ user `snapshot_name_suffix` }}",
+      "snapshot_regions": [
+        "nyc1"
+      ],
+      "ssh_username": "root",
+      "tags": [
+        "cluster-api-{{ user `build_name` }}:{{ user `kubernetes_semver` | replace_all `.` `-` }}"
+      ],
+      "type": "digitalocean"
+    }
+  ],
+  "provisioners": [
+    {
+      "ansible_env_vars": [
+        "ANSIBLE_SSH_ARGS='{{user `existing_ansible_ssh_args`}} {{user `ansible_common_ssh_args`}}'"
+      ],
+      "extra_arguments": [
+        "--extra-vars",
+        "{{user `ansible_common_vars`}}",
+        "--extra-vars",
+        "{{user `ansible_extra_vars`}}",
+        "--extra-vars",
+        "{{user `ansible_user_vars`}}",
+        "--scp-extra-args",
+        "{{user `ansible_scp_extra_args`}}"
+      ],
+      "playbook_file": "./ansible/node.yml",
+      "type": "ansible",
+      "user": "packer"
+    }
+  ],
+  "variables": {
+    "access_token": "{{env `DIGITALOCEAN_ACCESS_TOKEN`}}",
+    "ansible_common_vars": "",
+    "ansible_extra_vars": "",
+    "ansible_scp_extra_args": "",
+    "build_timestamp": "{{timestamp}}",
+    "containerd_enable_limit_no_file": "false",
+    "containerd_gvisor_runtime": "false",
+    "containerd_gvisor_version": "latest",
+    "containerd_image_pull_progress_timeout": null,
+    "containerd_service_url": "https://raw.githubusercontent.com/containerd/containerd/refs/tags/v{{user `containerd_version`}}/containerd.service",
+    "containerd_version": null,
+    "crictl_version": null,
+    "existing_ansible_ssh_args": "{{env `ANSIBLE_SSH_ARGS`}}",
+    "ib_version": "{{env `IB_VERSION`}}",
+    "kubernetes_cni_deb_version": null,
+    "kubernetes_cni_http_source": null,
+    "kubernetes_cni_rpm_version": null,
+    "kubernetes_cni_semver": null,
+    "kubernetes_cni_source_type": null,
+    "kubernetes_container_registry": null,
+    "kubernetes_deb_gpg_key": null,
+    "kubernetes_deb_repo": null,
+    "kubernetes_deb_version": null,
+    "kubernetes_http_source": null,
+    "kubernetes_load_additional_imgs": null,
+    "kubernetes_rpm_gpg_check": null,
+    "kubernetes_rpm_gpg_key": null,
+    "kubernetes_rpm_repo": null,
+    "kubernetes_rpm_version": null,
+    "kubernetes_semver": null,
+    "kubernetes_series": null,
+    "kubernetes_source_type": null,
+    "region": "nyc1",
+    "runc_version": null,
+    "size": "s-1vcpu-1gb"
+  }
+}

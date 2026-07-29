@@ -1,0 +1,24 @@
+---
+- name: Install cloud-init packages
+  ansible.builtin.apt:
+    name: "{{ packages }}"
+    state: present
+    force_apt_get: true
+  vars:
+    packages:
+      - cloud-init
+      - cloud-guest-utils
+      - cloud-initramfs-dyn-netconf
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Install Debian specific packages
+  ansible.builtin.apt:
+    name: cloud-initramfs-dyn-netconf
+    state: present
+  when: ansible_facts['distribution'] == 'Debian'
+
+- name: Install Ubuntu specific packages
+  ansible.builtin.apt:
+    name: cloud-initramfs-copymods
+    state: present
+  when: ansible_facts['distribution'] == 'Ubuntu'

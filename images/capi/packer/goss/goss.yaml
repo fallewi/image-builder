@@ -1,0 +1,7 @@
+gossfile:
+  goss-command.yaml: {}
+  goss-kernel-params.yaml: {}
+  goss-service.yaml: {}
+  goss-package.yaml: {}
+  goss-files.yaml: {}
+  goss-image-hygiene.yaml: {}

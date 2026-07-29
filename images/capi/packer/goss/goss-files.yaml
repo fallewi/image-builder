@@ -1,0 +1,48 @@
+file:
+{{range $name, $vers := index .Vars .Vars.OS "common-files"}}
+  {{ $name }}:
+    exists: {{ $vers.exists }}
+    filetype: {{ $vers.filetype }}
+{{end}}
+{{range $name, $vers := index .Vars .Vars.OS .Vars.PROVIDER "files"}}
+  {{ $name }}:
+    exists: {{ $vers.exists }}
+    filetype: {{ $vers.filetype }}
+    contains: {{ range $vers.contains }}
+    - {{.}}
+  {{end}}
+{{end}}
+{{if or (eq .Vars.OS "ubuntu") (eq .Vars.OS "photon")}}
+{{if .Vars.node_custom_roles_pre | regexMatch ".*gpu.*"}}
+  "/etc/modprobe.d/blocklist-nouveau.conf":
+    exists: true
+    filetype: file
+    contains:
+      - "blacklist nouveau"
+      - "options nouveau modeset=0"
+{{if eq .Vars.block_nouveau_loading "true"}}
+      - "install nouveau /bin/false"
+{{end}}
+{{end}}
+{{end}}
+{{if .Vars.extra_kernel_boot_params }}
+  "/boot/grub/grub.cfg":
+    exists: true
+    filetype: file
+    contains:
+      - {{ .Vars.extra_kernel_boot_params }}
+{{end}}
+{{if eq .Vars.containerd_enable_limit_no_file "true"}}
+  "/etc/systemd/system/containerd.service.d/limit-nofile.conf":
+    exists: true
+    filetype: file
+    contains:
+      - "LimitNOFILE=1048576"
+{{end}}
+{{if .Vars.image_builder_version }}
+  "/etc/image-builder-release":
+    exists: true
+    filetype: file
+    contains:
+      - "IMAGE_BUILDER_VERSION={{ .Vars.image_builder_version }}"
+{{end}}
